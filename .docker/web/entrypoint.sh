@@ -3,7 +3,8 @@
 set -e
 
 # Wait for MySQL to respond, depends on mysql-client
-while ! mysqladmin ping -h"$DB_HOST" --silent; do
+echo "Waiting for $DB_HOST..."
+while ! mysqladmin ping -h "$DB_HOST" --silent; do
     echo "MySQL is down"
     sleep 1
 done
@@ -11,17 +12,18 @@ done
 echo "MySQL is up"
 
 if [ -f installed ]; then
-   echo "ClarolineConnect is allready installed"
+   echo "ClarolineConnect is already installed"
 else
   echo "Executing configuration script"
-  php scripts/configure.php
+  php bin/configure
+  php bin/check
+  composer install --no-dev --optimize-autoloader
 
-  echo "Composer install"
-  if [[ "$ENV" == "dev" ]]; then
-    composer sync-dev
-  else
-    composer sync
-  fi
+  npm install
+
+  npm run webpack
+
+  php bin/console claroline:install
 
   if [[ -v PLATFORM_NAME ]]; then
     echo "Changing platform name to $PLATFORM_NAME";
@@ -34,6 +36,24 @@ else
   fi
 
   USERS=$(mysql $DB_NAME -u $DB_USER -p$DB_PASSWORD -h $DB_HOST -se "select count(*) from claro_user")
+
+  # BEGIN debug user creation
+  echo "USERS: $USERS"
+  
+  if ["$USERS" == "0"]; then
+    echo "USERS is 0"
+  fi
+
+  echo "ADMIN_FIRSTNAME: $ADMIN_FIRSTNAME"
+  
+  if [-v ADMIN_FIRSTNAME]; then
+    echo "-v ADMIN_FIRSTNAME is truthy"
+  fi
+  
+  if [ "$USERS" == "0" ] && [ -v ADMIN_FIRSTNAME ]; then
+    echo "USERS is 0 and -v ADMIN_FIRSTNAME is truthy"
+  fi
+  # END debug user creation
 
   if [ "$USERS" == "0" ] && [ -v ADMIN_FIRSTNAME ] && [ -v ADMIN_LASTNAME ] && [ -v ADMIN_USERNAME ] && [ -v ADMIN_PASSWORD ]  && [ -v ADMIN_EMAIL ]; then
     echo '*********************************************************************************************************************'
@@ -48,7 +68,17 @@ else
   touch installed
 fi
 
+# temporary workaround for missing folders
+mkdir -p var/sessions
+mkdir -p public/uploads
+
 echo "Setting correct file permissions"
 chmod -R 777 var/cache files/config var/log var/sessions files public/uploads
+
+echo "Disabling SAML in files/config/bundles.ini"
+# LightSaml\SymfonyBridgeBundle\LightSamlSymfonyBridgeBundle = true
+# LightSaml\SpBundle\LightSamlSpBundle = true
+sed 's/LightSaml\\SymfonyBridgeBundle\\LightSamlSymfonyBridgeBundle = true/LightSaml\\SymfonyBridgeBundle\\LightSamlSymfonyBridgeBundle = false/' files/config/bundles.ini
+sed 's/LightSaml\\SpBundle\\LightSamlSpBundle = true/LightSaml\\SpBundle\\LightSamlSpBundle = false/' files/config/bundles.ini
 
 exec "$@"
